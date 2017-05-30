@@ -70,9 +70,9 @@ def format_message(message, user, group):
     return message
 
 
-def determine_message_type(message):
+def determine_message_type(message, is_new_user):
     text = message.lower()
-    if text.startswith('start'):
+    if text.startswith('start') or is_new_user:
         return START_STORY
     elif text.startswith('join'):
         return JOIN_GROUP
@@ -84,9 +84,9 @@ def determine_message_type(message):
         return ANSWER
 
 
-def perform_action(message_type, message, user, group):
+def perform_action(message_type, message, user, group, is_new_user):
     if message_type == START_STORY:
-        return start_story(message, user, group)
+        return start_story(message, user, group, is_new_user)
     elif message_type == JOIN_GROUP:
         return join_group(message, user, group)
     elif message_type == REPEAT_CLUE:
@@ -109,8 +109,12 @@ def repeat_clue(message, user, group):
     )
 
 
-def start_story(message, user, group):
+def start_story(message, user, group, is_new_user):
     match = regex_dotall(r'^start (?P<code>.+)', message.text.lower())
+    if (is_new_user):
+        match = regex_dotall(r'(?:start )?(?P<code>.+)', message.text.lower())
+        logging.info("new user allow for code match without start")
+
     if not match:
         logging.info("No start code provided")
         return Result(response_type=INFO, messages=[START_INSTRUCTIONS], user=user, group=group)
@@ -218,17 +222,19 @@ class TwilioHandler(RequestHandler):
         from_phone = self.request.get('From')
         logging.info('Received text from %s with media: %s message:\n%s', from_phone, user_message.media_url, user_message.text)
 
+        is_new_user = True
         user = User.get_by_id(from_phone)
         if user:
             logging.info('Found existing user for %s', from_phone)
+            is_new_user = False
         else:
             logging.info('Creating new user for %s', from_phone)
             user = User(id=from_phone)
 
-        message_type = determine_message_type(user_message.text)
+        message_type = determine_message_type(user_message.text, is_new_user)
         logging.info('Message of type: %s', message_type)
         group = user.group
-        response_type, messages, user, group = perform_action(message_type, user_message, user, group)
+        response_type, messages, user, group = perform_action(message_type, user_message, user, group, is_new_user)
         responses = [format_message(m, user, group) for m in messages]
         logging.info('Responding with: %s', responses)
         self.response.body = twiml_response(user, group, response_type, responses)
